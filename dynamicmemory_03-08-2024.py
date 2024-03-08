@@ -42,7 +42,7 @@ class DynaToy:
             for ii in range(shape[0]):
                 loc = ((ii/shape[0]) * 2*np.pi)
                 W_l[ii, :] = stats.vonmises.pdf(x, self.kappas[i], loc)
-            W_l /= W_l.max()
+            # W_l /= W_l.max()
             W[rstart:rstop, cstart:cstop] = W_l
             W[cstart:cstop, rstart:rstop] = W_l.T
 
@@ -50,13 +50,47 @@ class DynaToy:
             plt.imshow(W)
 
         return W
+    
+
+    def step(self, r):    
+        self.r = self.W @ r
+        self.r /= np.linalg.norm(self.r)
+        # self.r /= self.r.max()
+        
+        return self.r
+
 
 
 
 # %%
-layer_sizes = [1000, 900, 600, 300, 100]
+layer_sizes = [1000, 900, 600, 300, 200]
+kappas = [20, 10, 5, 1]
+# kappas = []
+
 
 model = DynaToy(layer_sizes)
-model.W = model.init_weights(kappas = [10, 5, 3, 1], plot=True)
+
+model.W = model.init_weights(plot = True, kappas = kappas)
+
+x_input = np.zeros([layer_sizes[0], 1])
+x_pos, x_width = 180, 5
+
+center = int((x_pos/360) * layer_sizes[0])
+halfwidth = int((x_width/360) * layer_sizes[0] / 2)
+
+x_input[(center-halfwidth):(center+halfwidth)] = .1
+
+model.r[model.in_idx] = x_input
+
+timecourse = []
+timecourse.append(model.r)
+for i in range(10):
+    timecourse.append(model.step(model.r))
+
+
+    
+
+# %%
+plt.imshow(np.asarray(timecourse).squeeze().T, origin = 'upper', aspect = 'auto', interpolation='none')
 
 
