@@ -48,6 +48,7 @@ class DynaToy:
 
         if plot:
             plt.imshow(W)
+            plt.title("Model Weights")
 
         return W
     
@@ -87,10 +88,15 @@ timecourse.append(model.r)
 for i in range(10):
     timecourse.append(model.step(model.r))
 
-
-    
+# %%
+plt.imshow(np.asarray(timecourse).squeeze().T, origin = 'upper', aspect = 'auto', interpolation='none', cmap = 'RdBu_r')
+plt.xlabel("Timestep")
+plt.title("Timecourse")
+for i in range(len(model.layer_sizes)):
+    plt.hlines(y = np.sum(model.layer_sizes[:i]), xmin = -0.5, xmax = 10.5, color = 'black')
+    plt.text(x = -3.5, y = np.sum(model.layer_sizes[:i]) + model.layer_sizes[i]/2, s = "Layer " + str(i+1), color = 'black', size = 15)
 
 # %%
-plt.imshow(np.asarray(timecourse).squeeze().T, origin = 'upper', aspect = 'auto', interpolation='none')
+
 
 
