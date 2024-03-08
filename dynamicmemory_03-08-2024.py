@@ -41,8 +41,10 @@ class DynaToy:
 
             for ii in range(shape[0]):
                 loc = ((ii/shape[0]) * 2*np.pi)
-                W_l[ii, :] = stats.vonmises.pdf(x, self.kappas[i], loc)
-            # W_l /= W_l.max()
+                rf = stats.vonmises.pdf(x, self.kappas[i], loc)
+                rf /= np.linalg.norm(rf)
+                W_l[ii, :] = rf
+            
             W[rstart:rstop, cstart:cstop] = W_l
             W[cstart:cstop, rstart:rstop] = W_l.T
 
@@ -65,7 +67,8 @@ class DynaToy:
 
 # %%
 layer_sizes = [1000, 900, 600, 300, 200]
-kappas = [20, 10, 5, 1]
+kappas = [30, 20, 10, 5]
+n_timesteps = 30
 # kappas = []
 
 
@@ -74,27 +77,31 @@ model = DynaToy(layer_sizes)
 model.W = model.init_weights(plot = True, kappas = kappas)
 
 x_input = np.zeros([layer_sizes[0], 1])
-x_pos, x_width = 180, 5
+x_pos, x_width = 180, 10
 
 center = int((x_pos/360) * layer_sizes[0])
 halfwidth = int((x_width/360) * layer_sizes[0] / 2)
 
 x_input[(center-halfwidth):(center+halfwidth)] = .1
 
-model.r[model.in_idx] = x_input
-
 timecourse = []
 timecourse.append(model.r)
-for i in range(10):
+
+for i in range(n_timesteps):
+    if i < 5: model.r[model.in_idx] += x_input
     timecourse.append(model.step(model.r))
 
 # %%
 plt.imshow(np.asarray(timecourse).squeeze().T, origin = 'upper', aspect = 'auto', interpolation='none', cmap = 'RdBu_r')
+plt.gcf().set_size_inches([15, 10])
 plt.xlabel("Timestep")
 plt.title("Timecourse")
 for i in range(len(model.layer_sizes)):
-    plt.hlines(y = np.sum(model.layer_sizes[:i]), xmin = -0.5, xmax = 10.5, color = 'black')
-    plt.text(x = -3.5, y = np.sum(model.layer_sizes[:i]) + model.layer_sizes[i]/2, s = "Layer " + str(i+1), color = 'black', size = 15)
+    plt.hlines(y = np.sum(model.layer_sizes[:i]), xmin = -0.5, xmax = n_timesteps + .5, color = 'black')
+    plt.text(x = 0, y = np.sum(model.layer_sizes[:i])+100, s = "Layer " + str(i+1), color = 'white', size = 15)
+
+# %%
+plt.imshow(model.W, vmax = 1, vmin = 0)
 
 # %%
 
