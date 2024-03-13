@@ -32,7 +32,7 @@ class DynaToy:
         self.tau = 10   
 
     
-    def init_weights(self, kappas = [], plot = False, return_matrices = False, recurrence = False):
+    def init_weights(self, kappas = [], plot = False, return_matrices = False, recurrence = False, norm = False):
         W = np.zeros_like(self.W)
         W_L = []
 
@@ -58,7 +58,7 @@ class DynaToy:
             for ii in range(shape[0]):
                 loc = ((ii/shape[0]) * 2*np.pi)
                 rf = stats.vonmises.pdf(x, self.kappas[i], loc)
-                # rf /= np.linalg.norm(rf)
+                if norm: rf /= np.linalg.norm(rf)
                 W_l[ii, :] = rf
 
             
@@ -156,6 +156,41 @@ class DynaToy:
         self.layers = [np.zeros([m, 1]) for m in self.layer_sizes]
 
         self.r = np.concatenate(self.layers)
+
+    
+    def compute_widths(self):
+        start = 0
+        widths = np.zeros(len(self.layer_sizes))
+
+        for i, layer in enumerate(self.layer_sizes):
+            stop = start + layer
+            response = self.r[start:stop].squeeze()
+
+            peak, _ = find_peaks(response)
+            width, _, _, _ = peak_widths(response, peak)
+
+            if len(width) != 1:
+                width = 0
+            widths[i] = (width/layer) * 360
+            
+            start += self.layer_sizes[i]
+
+        return widths
+    
+
+    def compute_amplitudes(self):
+        start = 0
+        amps = np.zeros(len(self.layer_sizes))
+
+        for i, layer in enumerate(self.layer_sizes):
+            stop = start + layer
+            response = self.r[start:stop].squeeze()
+            
+            amps[i] = response.max()
+
+            start += self.layer_sizes[i]
+
+        return amps
 
 
     def plot(self, timecourse, h, stim_on = 0):
@@ -282,7 +317,7 @@ kappas = [50, 50, 50]
 
 n_timesteps = 500
 x_pos = 180
-stim_on = 120
+stim_on = 250
 k_input = 1000
 
 model = DynaToy(layer_sizes)
@@ -355,24 +390,256 @@ model.plot(timecourse, h)
 
 
 
-# %%
-np.linalg.eigvals(model.W).max()
-
 # %% [markdown]
 # Could attention modulation work here by scaling the recurrent weights in each layer?
 # 
 # Or, Recurrent weights are exist in a state, such that, when inhibited, they sharpen the representation in a layer
 
 # %% [markdown]
-# 
+# # Tuning Widths
 
-# %% [markdown]
-# 
+# %%
+model.W
 
-# %% [markdown]
-# 
+# %%
 
-# %% [markdown]
-# Or
+
+# %%
+1/model.W.sum()
+
+# %%
+n_timesteps = 500
+stim_on = 500
+# layer_sizes = [1000, 900, 600, 300]
+layer_sizes = [100, 90, 60, 30]
+kappas = [36, 12, 4]            # 36, 12, 4, give similar tuning widths to perception condition
+# kappas = [10, 10, 10]    
+k_input = 20
+
+model = DynaToy(layer_sizes)
+model.W_ff_0 = .05     # Scales the FF weights - affects the next layer's amplitude
+model.W_ff_1 = -.003       # Shifts the FF weights 
+model.W_fb_0 = .05   # Scales the FB weights - affects the prev layer's amplitude
+model.W_fb_1 = -.003        # Shifts the FB weights 
+
+
+# Scale and Shift the Recurrence weights
+model.W_r_0 = .5
+model.W_r_1 = -0.3
+
+recurrence = ''
+
+model.W, W_L = model.init_weights(plot = True, kappas = kappas, return_matrices=True, recurrence = recurrence)
+
+# Each Layer's Center locations for computing peak tuning widths
+peaks = []
+pos = 0
+for i in range(len(model.layer_sizes)):
+    peak  = pos + int(model.layer_sizes[i]/2) 
+    peaks.append(peak)
+    pos += model.layer_sizes[i]
+
+# Feedforward
+theta = np.linspace(0, 2*np.pi, layer_sizes[0])
+h = stats.vonmises.pdf(theta, k_input, np.radians(x_pos), 1)
+# h/= h.max()
+h = np.expand_dims(h, 1)
+
+timecourse_ff = np.zeros([model.r.shape[0], n_timesteps])
+H = np.zeros_like(timecourse_ff)
+Widths_ff = np.zeros([len(model.layer_sizes), n_timesteps])
+Amps_ff = np.zeros([len(model.layer_sizes), n_timesteps])
+
+for t in range(n_timesteps):
+    x_in = np.zeros_like(model.r)
+    if t < stim_on:
+        x_in[model.in_idx] = h
+        model.r = model.euler(h = x_in)
+    else:
+        model.r = model.euler(h = x_in)
+
+    timecourse_ff[:, t] = model.r.squeeze()
+    H[:, t] = x_in.squeeze()
+    Widths_ff[:, t] = model.compute_widths()
+    Amps_ff[:, t] = model.compute_amplitudes()
+model.plot(timecourse_ff, h)
+
+# Feedback
+h = model.r[model.out_idx]
+model.reset()
+
+theta = np.linspace(0, 2*np.pi, layer_sizes[-1])
+# h = stats.vonmises.pdf(theta, k_input, np.radians(x_pos), 1)
+# h = np.expand_dims(h, 1)
+
+timecourse_fb = np.zeros([model.r.shape[0], n_timesteps])
+H = np.zeros_like(timecourse_fb)
+Widths_fb = np.zeros([len(model.layer_sizes), n_timesteps])
+Amps_fb = np.zeros([len(model.layer_sizes), n_timesteps])
+
+for t in range(n_timesteps):
+    x_in = np.zeros_like(model.r)
+    if t < stim_on:
+        x_in[model.out_idx] = h
+        model.r = model.euler(h = x_in)
+    else:
+        model.r = model.euler(h = x_in)
+
+    timecourse_fb[:, t] = model.r.squeeze()
+    H[:, t] = x_in.squeeze()
+    Amps_fb[:, t] = model.compute_amplitudes()
+    Widths_fb[:, t] = model.compute_widths()
+
+model.plot(timecourse_fb, h)
+
+fig, axs = plt.subplots(1, 2, figsize = [7, 5])
+
+t = 250
+
+# Amplitude
+ax = axs[0]
+
+ax.scatter(x = Amps_ff[:, t], y = [i for i in range(len(model.layer_sizes))])
+ax.scatter(x = Amps_fb[:, t], y = [i for i in range(len(model.layer_sizes))])
+ax.invert_yaxis()
+ax.set_title("Amplitude")
+ax.set_ylabel("Layer")
+ax.set_yticks([i for i in range(len(model.layer_sizes))])
+
+ax = axs[1]
+
+ax.scatter(x = Widths_ff[:, t], y = [i for i in range(len(model.layer_sizes))])
+ax.scatter(x = Widths_fb[:, t], y = [i for i in range(len(model.layer_sizes))])
+ax.invert_yaxis()
+ax.set_title("Widths")
+ax.set_yticks([i for i in range(len(model.layer_sizes))])
+ax.set_xlim([30, 200])
+ax.set_xscale('log')
+ax.xaxis.set_minor_formatter(mticker.ScalarFormatter())
+
+# %%
+x_in.shape
+
+# %%
+n_timesteps = 500
+stim_on = 500
+# layer_sizes = [1000, 900, 600, 300]
+layer_sizes = [100, 90, 60, 30]
+kappas = [36, 12, 4]            # 36, 12, 4, give similar tuning widths to perception condition
+# kappas = [10, 10, 10]    
+k_input = 20
+
+model = DynaToy(layer_sizes)
+model.W_ff_0 = .05     # Scales the FF weights - affects the next layer's amplitude
+model.W_ff_1 = -.003       # Shifts the FF weights 
+model.W_fb_0 = .05   # Scales the FB weights - affects the prev layer's amplitude
+model.W_fb_1 = -.003        # Shifts the FB weights 
+
+
+# Scale and Shift the Recurrence weights
+model.W_r_0 = .8
+model.W_r_1 = -2
+
+recurrence = 'cosine'
+
+model.W, W_L = model.init_weights(plot = True, kappas = kappas, return_matrices=True, recurrence = recurrence)
+
+# Each Layer's Center locations for computing peak tuning widths
+peaks = []
+pos = 0
+for i in range(len(model.layer_sizes)):
+    peak  = pos + int(model.layer_sizes[i]/2) 
+    peaks.append(peak)
+    pos += model.layer_sizes[i]
+
+# Feedforward
+theta = np.linspace(0, 2*np.pi, layer_sizes[0])
+h = stats.vonmises.pdf(theta, k_input, np.radians(x_pos), 1)
+# h/= h.max()
+h = np.expand_dims(h, 1)
+
+timecourse_ff = np.zeros([model.r.shape[0], n_timesteps])
+H = np.zeros_like(timecourse_ff)
+Widths_ff = np.zeros([len(model.layer_sizes), n_timesteps])
+Amps_ff = np.zeros([len(model.layer_sizes), n_timesteps])
+
+for t in range(n_timesteps):
+    x_in = np.zeros_like(model.r)
+    if t < stim_on:
+        x_in[model.in_idx] = h
+        model.r = model.euler(h = x_in)
+    else:
+        model.r = model.euler(h = x_in)
+
+    timecourse_ff[:, t] = model.r.squeeze()
+    H[:, t] = x_in.squeeze()
+    Widths_ff[:, t] = model.compute_widths()
+    Amps_ff[:, t] = model.compute_amplitudes()
+model.plot(timecourse_ff, h)
+
+# Feedback
+h = model.r[model.out_idx]
+model.reset()
+
+theta = np.linspace(0, 2*np.pi, layer_sizes[-1])
+# h = stats.vonmises.pdf(theta, k_input, np.radians(x_pos), 1)
+# h = np.expand_dims(h, 1)
+
+timecourse_fb = np.zeros([model.r.shape[0], n_timesteps])
+H = np.zeros_like(timecourse_fb)
+Widths_fb = np.zeros([len(model.layer_sizes), n_timesteps])
+Amps_fb = np.zeros([len(model.layer_sizes), n_timesteps])
+
+for t in range(n_timesteps):
+    x_in = np.zeros_like(model.r)
+    if t < stim_on:
+        x_in[model.out_idx] = h
+        model.r = model.euler(h = x_in)
+    else:
+        model.r = model.euler(h = x_in)
+
+    timecourse_fb[:, t] = model.r.squeeze()
+    H[:, t] = x_in.squeeze()
+    Amps_fb[:, t] = model.compute_amplitudes()
+    Widths_fb[:, t] = model.compute_widths()
+
+model.plot(timecourse_fb, h)
+
+fig, axs = plt.subplots(1, 2, figsize = [7, 5])
+
+t = 499
+
+# Amplitude
+ax = axs[0]
+
+ax.scatter(x = Amps_ff[:, t], y = [i for i in range(len(model.layer_sizes))])
+ax.scatter(x = Amps_fb[:, t], y = [i for i in range(len(model.layer_sizes))])
+ax.invert_yaxis()
+ax.set_title("Amplitude")
+ax.set_ylabel("Layer")
+ax.set_yticks([i for i in range(len(model.layer_sizes))])
+
+ax = axs[1]
+
+ax.scatter(x = Widths_ff[:, t], y = [i for i in range(len(model.layer_sizes))])
+ax.scatter(x = Widths_fb[:, t], y = [i for i in range(len(model.layer_sizes))])
+ax.invert_yaxis()
+ax.set_title("Widths")
+ax.set_yticks([i for i in range(len(model.layer_sizes))])
+ax.set_xlim([30, 200])
+ax.set_xscale('log')
+ax.xaxis.set_minor_formatter(mticker.ScalarFormatter())
+
+# %%
+model.r.shape[0]
+
+# %%
+plt.imshow(model.W[0:100, 0:100], vmin = -.04, vmax = 0.04)
+
+# %%
+model.W[0:100, 0:100].min()
+
+# %%
+
 
 
